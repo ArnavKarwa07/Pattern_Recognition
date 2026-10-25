@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "speechdeepfake"
+version = "0.1.0"
+description = "Robust detection of AI-generated speech: MFCC+SVM, log-Mel+CNN and wav2vec 2.0+SVM compared in-domain and cross-domain."
+readme = "README.md"
+requires-python = ">=3.10,<3.13"
+license = { text = "MIT" }
+dependencies = [
+    "numpy>=1.24,<2.3",
+    "scipy>=1.10",
+    "pandas>=2.0",
+    "scikit-learn>=1.3",
+    "joblib>=1.3",
+    "soundfile>=0.12",
+    "librosa>=0.10",
+    "torch>=2.1",
+    "transformers>=4.38",
+    "pyarrow>=14",
+    "huggingface_hub>=0.20",
+    "matplotlib>=3.7",
+    "PyYAML>=6.0",
+    "tqdm>=4.65",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4"]
+
+[project.scripts]
+speechdeepfake = "speechdeepfake.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+markers = ["slow: tests that take more than a few seconds"]

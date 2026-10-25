@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.venv/
+venv/
+.ipynb_checkpoints/
+
+# Datasets, caches and experiment outputs (regenerable, large)
+# (anchored with a leading / so they do not match src/speechdeepfake/models etc.)
+/data/
+/models/
+/results/
+# reports/figures and reports/tables are committed so the report renders on GitHub
+/reports/pilot/
+*.log
+
+# Audio and arrays should never be committed
+*.wav
+*.flac
+*.npz
+*.npy
+*.pt
+*.joblib
+*.parquet
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

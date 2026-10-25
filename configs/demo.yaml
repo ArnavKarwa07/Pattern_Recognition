@@ -1,0 +1,57 @@
+# Demonstration run on the small stratified subsets fetched by
+#   speechdeepfake download-subset --config configs/demo.yaml
+# Same pipeline, splits and evaluation as default.yaml, but the data are
+# subsets (see data/raw/*/SUBSET.json), so results are labelled as pilot
+# results, not final research results.
+run_name: demo
+run_type: pilot
+seed: 1234
+device: auto
+feature_chunk_size: 128
+
+paths:
+  data_dir: data
+  models_dir: models
+  results_dir: results
+  reports_dir: reports
+
+audio:
+  sample_rate: 16000
+  max_duration: 4.0
+  eval_crop: start
+  pad_mode: repeat
+
+mfcc:
+  n_mfcc: 40
+  n_mels: 64
+  delta_order: 0
+  n_jobs: 4
+
+logmel:
+  n_mels: 80
+
+svm:
+  C_grid: [0.1, 1.0, 10.0]
+  gamma_grid: ["scale*0.3", "scale", "scale*3"]
+
+cnn:
+  channels: [16, 32, 64, 128]
+  batch_size: 32
+  epochs: 30
+  early_stopping_patience: 5
+  norm_stats_samples: 600
+  num_workers: 0
+
+wav2vec:
+  model_name: facebook/wav2vec2-base
+  batch_size: 8
+
+data:
+  asvspoof_root: raw/ASVspoof2019/LA
+  cdadd_root: raw/cdadd
+  test_sets:
+    - {name: asvspoof19_la_eval, corpus: asvspoof2019_la, split: eval, condition: in_domain}
+    - {name: cdadd_test, corpus: cdadd, split: test, condition: external_domain}
+
+evaluation:
+  n_bootstrap: 200

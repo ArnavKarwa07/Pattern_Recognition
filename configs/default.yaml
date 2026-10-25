@@ -1,0 +1,100 @@
+# Full experiment: official ASVspoof 2019 LA train/dev for fitting and model
+# selection, LA eval for in-domain testing, CD-ADD test for external testing.
+# No subsampling is allowed in a "full" run.
+run_name: default
+run_type: full
+seed: 1234
+device: auto            # auto | cpu | cuda
+feature_chunk_size: 512 # recordings per cache chunk (resumable unit)
+
+paths:
+  # Large data can live outside OneDrive: use an absolute path here or set the
+  # SPEECHDEEPFAKE_DATA_DIR environment variable.
+  data_dir: data
+  models_dir: models
+  results_dir: results
+  reports_dir: reports
+
+audio:
+  sample_rate: 16000
+  mono: true
+  max_duration: 4.0     # seconds (64,000 samples), shared by all three models
+  eval_crop: start
+  train_random_crop: false
+  pad_mode: repeat
+  normalization: none
+  trim_silence_db: null
+  silence_threshold: 1.0e-4
+  min_duration: 0.1
+
+mfcc:
+  n_mfcc: 40
+  n_mels: 64
+  n_fft: 512
+  win_length: 400       # 25 ms
+  hop_length: 160       # 10 ms
+  fmin: 20.0
+  fmax: null
+  delta_order: 0        # 1 adds deltas, 2 adds delta-deltas
+  n_jobs: 4
+
+logmel:
+  n_mels: 80
+  n_fft: 512
+  win_length: 400
+  hop_length: 160
+  fmin: 20.0
+  fmax: null
+  log_offset: 1.0e-6
+
+svm:
+  C_grid: [0.1, 1.0, 10.0]
+  gamma_grid: ["scale*0.3", "scale", "scale*3"]
+  class_weight: balanced
+  selection_metric: eer
+  cache_size_mb: 2000
+  max_iter: -1
+
+cnn:
+  channels: [16, 32, 64, 128]
+  dropout: 0.3
+  batch_size: 32
+  epochs: 30
+  learning_rate: 1.0e-3
+  weight_decay: 1.0e-4
+  lr_scheduler: plateau
+  lr_factor: 0.5
+  lr_patience: 2
+  early_stopping_patience: 5
+  class_weighted_loss: true
+  norm_stats_samples: 2000
+  num_workers: 2
+  selection_metric: eer
+
+wav2vec:
+  model_name: facebook/wav2vec2-base
+  layer: -1
+  pooling: mean
+  batch_size: 8
+  allow_download: true
+
+data:
+  asvspoof_root: raw/ASVspoof2019/LA   # relative to paths.data_dir
+  cdadd_root: raw/cdadd
+  custom_manifest: null
+  train: {corpus: asvspoof2019_la, split: train}
+  dev: {corpus: asvspoof2019_la, split: dev}
+  test_sets:
+    - {name: asvspoof19_la_eval, corpus: asvspoof2019_la, split: eval, condition: in_domain}
+    - {name: cdadd_test, corpus: cdadd, split: test, condition: external_domain}
+  holdout_generators: []
+  max_train_samples: null
+  max_dev_samples: null
+  max_test_samples: null
+  require_validation: true
+
+evaluation:
+  threshold_method: eer   # chosen on the dev set, applied unchanged to test sets
+  n_bootstrap: 200
+  ci_level: 0.95
+  batch_size: 32
