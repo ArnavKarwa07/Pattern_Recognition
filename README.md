@@ -48,10 +48,10 @@ All three pipelines, the data layer, the evaluation, the robustness study, the f
 
 ## Running the project from the zip
 
-The submitted zip (`Pattern_Recognition.zip`, ~45 MB) contains everything **except** the downloaded audio clips (~390 MB) and the Python environment. It includes:
+The submitted zip (`Pattern_Recognition.zip`, under 10 MB) contains everything **except** three regenerable items: the downloaded audio clips (~390 MB), the cached feature vectors (`data/processed/`, ~33 MB, recomputed automatically the first time they are needed) and the Python environment. It includes:
 
 - the code, configs, tests, documentation and all results (`results/final_report.md`, `results/figures/`, `results/tables/`);
-- the **trained demo models** (`models/demo/`) and the cached features (`data/processed/`);
+- the **trained demo models** (`models/demo/`; for the CNN only the selected checkpoint `best.pt` — the resume checkpoint `last.pt` is omitted, so `train --resume` starts from scratch);
 - the dataset metadata: ASVspoof protocol files, CD-ADD labels, and `data/raw/*/SUBSET.json`, which records exactly which clips the demo used.
 
 **Just reading the results needs no setup.** Open [results/final_report.md](results/final_report.md) or the documents in [docs/](docs/).
@@ -76,7 +76,8 @@ speechdeepfake download-subset --config configs/demo.yaml
 speechdeepfake prepare-data    --config configs/demo.yaml   # rebuilds manifests, exports the CD-ADD clips
 speechdeepfake validate-data   --config configs/demo.yaml
 
-# 5a. re-score the included trained models and rebuild the report (no retraining)
+# 5a. re-score the included trained models and rebuild the report (no retraining;
+#     the first run recomputes the MFCC and wav2vec 2.0 features, ~10 min on a CPU laptop)
 speechdeepfake evaluate-all --config configs/demo.yaml
 speechdeepfake robustness   --config configs/demo.yaml
 speechdeepfake report       --config configs/demo.yaml
