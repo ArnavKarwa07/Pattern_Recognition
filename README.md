@@ -46,6 +46,49 @@ All three pipelines, the data layer, the evaluation, the robustness study, the f
 | `tests/`, `scripts/` | unit / end-to-end tests; helper scripts |
 | `data/`, `models/` | datasets and trained models (git-ignored, regenerable) |
 
+## Running the project from the zip
+
+The submitted zip (`Pattern_Recognition.zip`, ~45 MB) contains everything **except** the downloaded audio clips (~390 MB) and the Python environment. It includes:
+
+- the code, configs, tests, documentation and all results (`results/final_report.md`, `results/figures/`, `results/tables/`);
+- the **trained demo models** (`models/demo/`) and the cached features (`data/processed/`);
+- the dataset metadata: ASVspoof protocol files, CD-ADD labels, and `data/raw/*/SUBSET.json`, which records exactly which clips the demo used.
+
+**Just reading the results needs no setup.** Open [results/final_report.md](results/final_report.md) or the documents in [docs/](docs/).
+
+**To run the code:**
+
+```bash
+# 1. unzip and enter the folder
+cd Pattern_Recognition
+
+# 2. create the environment (Python 3.10-3.12)
+python -m venv .venv
+.venv\Scripts\activate                # Windows PowerShell / cmd;  Git Bash: source .venv/Scripts/activate;  Linux/macOS: source .venv/bin/activate
+pip install -e ".[dev]"
+
+# 3. check the installation (no data needed; output goes to the system temp folder)
+pytest -m "not slow"
+speechdeepfake smoke-test --config configs/quick_test.yaml
+
+# 4. re-download the same demo audio clips (~390 MB; only missing files are fetched)
+speechdeepfake download-subset --config configs/demo.yaml
+speechdeepfake prepare-data    --config configs/demo.yaml   # rebuilds manifests, exports the CD-ADD clips
+speechdeepfake validate-data   --config configs/demo.yaml
+
+# 5a. re-score the included trained models and rebuild the report (no retraining)
+speechdeepfake evaluate-all --config configs/demo.yaml
+speechdeepfake robustness   --config configs/demo.yaml
+speechdeepfake report       --config configs/demo.yaml
+
+# 5b. or retrain everything from scratch (under an hour on a CPU laptop)
+speechdeepfake run-all    --config configs/demo.yaml
+speechdeepfake robustness --config configs/demo.yaml --force
+speechdeepfake report     --config configs/demo.yaml
+```
+
+The subset selection is seeded (`seed: 1234` in `configs/demo.yaml`), so step 4 fetches the same clips that produced the included results. Downloading needs an internet connection: the ASVspoof clips come from Edinburgh DataShare and the CD-ADD clips from Hugging Face. If either source changes or is unavailable, the included results and models stay valid; only re-running needs the audio.
+
 ## Experimental design
 
 - **Train:** official ASVspoof 2019 LA training partition. **Validation:** official LA development partition, used for SVM hyperparameters, CNN checkpoint selection/early stopping, and the operating threshold.
