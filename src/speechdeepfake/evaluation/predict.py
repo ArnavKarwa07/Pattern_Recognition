@@ -1,8 +1,8 @@
 """Score trained models on the configured test sets and aggregate the results.
 
 Per model and test set this writes
-``results/<run>/predictions/<model>__<test>.csv`` (one row per recording) and
-``results/<run>/metrics/<model>__<test>.json``. :func:`compile_results` then
+``results/run_data/<run>/predictions/<model>__<test>.csv`` (one row per recording) and
+``results/run_data/<run>/metrics/<model>__<test>.json``. :func:`compile_results` then
 builds the comparison tables on the records that *all* evaluated models
 scored, so that every model is compared on identical recordings.
 """

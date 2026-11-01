@@ -1,6 +1,6 @@
 # Pilot configuration: same pipeline and splits as default.yaml, but on
 # stratified random subsets so a full train/evaluate cycle runs in minutes.
-# Results are labelled "pilot" and written to reports/pilot/, never to the
+# Results are labelled "pilot" and written to results/run_data/pilot_report/, never to the
 # final report. `speechdeepfake smoke-test` also reads its model settings from
 # here but runs on a synthetic fixture instead of the datasets.
 run_name: pilot
@@ -12,8 +12,8 @@ feature_chunk_size: 256
 paths:
   data_dir: data
   models_dir: models
-  results_dir: results
-  reports_dir: reports/pilot
+  results_dir: results/run_data
+  reports_dir: results/run_data/pilot_report
 
 audio:
   sample_rate: 16000

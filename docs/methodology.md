@@ -1,10 +1,10 @@
 # Methodology and implementation notes
 
 This document records the decisions behind the code so that the group can
-defend them. The planning documents in the repository root
-([case study](../CaseStudy_ProblemDefinition.md), [Solution 1](../Solution1_MFCCFeatures+SVM.md),
-[Solution 2](../Solution2_Log-MelSpectrogram+CNN.md), [Solution 3](../Solution3_wav2vec2.0Embeddings+SVM.md))
-describe the motivation; this file describes what is actually implemented.
+defend them. The case study and the three solution reports
+([case study](CaseStudy_ProblemDefinition.md), [Solution 1](Solution1_MFCCFeatures+SVM.md),
+[Solution 2](Solution2_Log-MelSpectrogram+CNN.md), [Solution 3](Solution3_wav2vec2.0Embeddings+SVM.md))
+describe the motivation and results; this file describes what is actually implemented.
 
 ## Classes and scores
 
@@ -129,11 +129,50 @@ not verified by fingerprinting. CD-ADD results are additionally broken down by
   are first computed and stored in the cache).
 - Comparisons use only the records scored by **all** models on that test set.
 
+## Robustness to audio degradations (`evaluation/robustness.py`)
+
+The case study asks whether compression and channel conditions change the
+results. `speechdeepfake robustness` re-scores the **already trained** models
+(no retraining, dev thresholds unchanged) on degraded copies of every test
+recording:
+
+| condition | what is done | measured |
+|---|---|---|
+| `mp3_high` | MP3 (LAME through libsndfile, CBR, compression level 0.5) | ≈ 80 kbps at 16 kHz mono |
+| `mp3_low` | MP3, compression level 0.9 | ≈ 25 kbps |
+| `narrowband` | resample to 8 kHz and back (telephone band, nothing above 4 kHz) | – |
+| `noise_20db` | additive white Gaussian noise at 20 dB SNR, seed derived from the record id | – |
+
+- The shared preprocessing (4 s window) is applied first, then the
+  degradation; MP3 conditions are stored as real `.mp3` files and decoded again
+  by the normal `load_and_preprocess`, so the decoder path is exercised.
+- Degraded record ids carry a suffix `#<condition>-<hash of parameters>`, so
+  changing a parameter can never reuse stale cached features.
+- All conditions (and `clean`, the original predictions) are compared on the
+  same records; EER bootstrap CIs as for the main results.
+- Outputs: `results/run_data/<run>/robustness/*.csv`, `metrics/robustness.csv`,
+  `metrics/robustness_conditions.json` (with measured MP3 bit rates), figures
+  `robustness_*.png`. Degraded audio is deleted after scoring unless
+  `robustness.keep_audio: true`.
+
+## Figures produced by `speechdeepfake report`
+
+| group | files (`results/figures/`) |
+|---|---|
+| overview | `pipeline_overview.png` |
+| data | `partition_counts`, `class_distribution`, `duration_distribution`, `waveforms` |
+| features | `mfcc_heatmap`, `logmel_examples`, `pca_features` |
+| training | `svm_tuning` (dev EER over the C × gamma grid), `cnn_learning_curves` |
+| per test set | `roc_*`, `det_*` (normal-deviate axes, ASVspoof convention), `pr_*`, `scores_*` (score histograms + dev threshold), `confusion_*` |
+| comparison | `eer_comparison`, `ba_f1_comparison`, `generalization_eer`, `inference_time`, `tradeoff_eer_vs_time` |
+| per generator / domain | `eer_heatmap_generator_*`, `eer_by_generator_*`, `eer_by_source_domain_*` |
+| robustness | `robustness_examples`, `robustness_eer`, `robustness_balanced_accuracy` |
+
 ## Reproducibility
 
 - Global seed (`seed`) for Python, NumPy, PyTorch and data-loader shuffling;
   deterministic per-sample RNG for training crops.
-- Config snapshots in `results/<run>/config_snapshots/` and next to each model.
+- Config snapshots in `results/run_data/<run>/config_snapshots/` and next to each model.
 - `environment` block (Python, OS, CPU/GPU, package versions) in every
   `metadata.json` and metrics JSON.
 - Feature caches are keyed by a hash of the feature and audio configuration;

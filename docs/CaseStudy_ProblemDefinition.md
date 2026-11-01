@@ -39,7 +39,28 @@ The project will produce three trained classifiers, implementation code, visuali
 
 The expected contribution is an experimental comparison of three pattern-recognition approaches, including an investigation of whether their performance changes when evaluated on speech from different generation systems. No performance improvement will be assumed before the experiments are conducted.
 
-## 5. References
+## 5. Outcome (demo run)
+
+All three classifiers, the evaluation and the compression study have been implemented and run end to end on stratified subsets of the data (pilot run; not final research results). Full details: [final report](../results/final_report.md) and the per-solution reports ([Solution 1](Solution1_MFCCFeatures+SVM.md) · [Solution 2](Solution2_Log-MelSpectrogram+CNN.md) · [Solution 3](Solution3_wav2vec2.0Embeddings+SVM.md)).
+
+| | MFCC + SVM | log-Mel + CNN | wav2vec 2.0 + SVM |
+|---|---|---|---|
+| EER, ASVspoof 2019 LA eval (in domain, unseen attacks) | 18.15% | 16.62% | **8.00%** |
+| ROC-AUC, in domain | 0.906 | 0.911 | **0.978** |
+| EER, CD-ADD (external, five newer TTS systems) | 46.49% | 47.86% | 57.14% |
+| EER in domain under 20 dB noise / ~25 kbps MP3 | 31.3% / 21.9% | 43.3% / 16.6% | 26.8% / 12.3% |
+| inference time per recording | 4.2 ms | 5.5 ms | 145 ms |
+
+![In-domain vs. external-domain EER](../results/figures/generalization_eer.png)
+
+Answers to the case-study questions:
+
+- **Which approach detects best?** In domain, frozen wav2vec 2.0 embeddings + SVM, by a margin larger than the confidence intervals.
+- **Does it generalise to unseen generation systems?** Within ASVspoof's unseen attacks, partly: A17–A19 remain hard for every model. On CD-ADD's newer zero-shot TTS systems, no: all three models are at or below chance. This is the main finding, and it matches the motivation of the study.
+- **Effect of compression and channel conditions:** moderate MP3 and narrowband cost at most a few EER points for wav2vec 2.0 + SVM and the CNN. Additive noise hurts every model, the CNN most, and it shifts the scores so the dev-selected thresholds stop working.
+- **Cost:** MFCC + SVM and the CNN run in a few milliseconds per recording; wav2vec 2.0 costs about 30× more.
+
+## 6. References
 
 1. Li, Y. et al. (2024). "Cross-Domain Audio Deepfake Detection: Dataset and Analysis." Proceedings of EMNLP 2024, pp. 4977–4983.
    https://aclanthology.org/2024.emnlp-main.286/

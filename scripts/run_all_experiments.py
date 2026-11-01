@@ -1,6 +1,6 @@
-"""Full pipeline: prepare -> validate -> train all -> evaluate all -> figures -> report.
+"""Full pipeline: prepare -> validate -> train all -> evaluate all -> [robustness] -> figures -> report.
 
-Usage:  python scripts/run_all_experiments.py --config configs/default.yaml [--resume]
+Usage:  python scripts/run_all_experiments.py --config configs/default.yaml [--resume] [--robustness]
 
 Stops at the first failing stage. Validation is skipped when the manifest is
 unchanged; data preparation re-reads the protocols/parquet but does not
@@ -17,12 +17,16 @@ def run() -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--config", default="configs/default.yaml")
     ap.add_argument("--resume", action="store_true", help="resume CNN training from last.pt")
+    ap.add_argument("--robustness", action="store_true",
+                    help="also score MP3/narrowband/noisy copies of the test sets, then rebuild the report")
     args = ap.parse_args()
     stages = [
         ["prepare-data", "--config", args.config],
         ["validate-data", "--config", args.config],
         ["run-all", "--config", args.config, *(["--resume"] if args.resume else [])],
     ]
+    if args.robustness:
+        stages += [["robustness", "--config", args.config], ["report", "--config", args.config]]
     for argv in stages:
         print(f"\n=== speechdeepfake {' '.join(argv)}")
         code = main(argv)

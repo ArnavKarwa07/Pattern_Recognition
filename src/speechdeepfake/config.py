@@ -152,8 +152,8 @@ class PathsConfig:
     # data_dir may be absolute (recommended outside OneDrive for multi-GB data).
     data_dir: str = "data"
     models_dir: str = "models"
-    results_dir: str = "results"
-    reports_dir: str = "reports"
+    results_dir: str = "results/run_data"
+    reports_dir: str = "results"
 
 
 @dataclass
@@ -163,6 +163,20 @@ class EvalConfig:
     n_bootstrap: int = 200
     ci_level: float = 0.95
     batch_size: int = 32
+
+
+ROBUSTNESS_CONDITIONS = ("mp3_high", "mp3_low", "narrowband", "noise_20db")
+
+
+@dataclass
+class RobustnessConfig:
+    # Audio degradations applied to the test sets by `speechdeepfake robustness`
+    # (models are not retrained; the dev-selected thresholds are reused).
+    conditions: list = field(default_factory=lambda: list(ROBUSTNESS_CONDITIONS))
+    # Test-set names to degrade; null = every configured test set.
+    test_sets: Optional[list] = None
+    # Keep the degraded 4 s clips on disk (data/processed/robustness_audio) after scoring.
+    keep_audio: bool = False
 
 
 @dataclass
@@ -181,6 +195,7 @@ class ExperimentConfig:
     data: DataConfig = field(default_factory=DataConfig)
     paths: PathsConfig = field(default_factory=PathsConfig)
     evaluation: EvalConfig = field(default_factory=EvalConfig)
+    robustness: RobustnessConfig = field(default_factory=RobustnessConfig)
     # Set by the loader, not by YAML.
     project_root: str = "."
     config_path: Optional[str] = None
@@ -271,6 +286,12 @@ class ExperimentConfig:
             TestSetConfig(**t)  # raises TypeError on bad keys
             if t.get("condition", "in_domain") not in ("in_domain", "external_domain", "generator_held_out"):
                 raise ConfigError(f"Bad condition for test set {t['name']!r}")
+        bad = [c for c in self.robustness.conditions if c not in ROBUSTNESS_CONDITIONS]
+        if bad:
+            raise ConfigError(f"Unknown robustness.conditions {bad}; choose from {list(ROBUSTNESS_CONDITIONS)}")
+        unknown = [t for t in (self.robustness.test_sets or []) if t not in names]
+        if unknown:
+            raise ConfigError(f"robustness.test_sets {unknown} are not configured test sets {names}")
 
 
 def stable_hash(obj: Any, length: int = 12) -> str:
@@ -305,6 +326,7 @@ _SECTIONS = {
     "data": DataConfig,
     "paths": PathsConfig,
     "evaluation": EvalConfig,
+    "robustness": RobustnessConfig,
 }
 
 

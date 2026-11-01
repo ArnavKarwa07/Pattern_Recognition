@@ -12,8 +12,8 @@ feature_chunk_size: 128
 paths:
   data_dir: data
   models_dir: models
-  results_dir: results
-  reports_dir: reports
+  results_dir: results/run_data
+  reports_dir: results
 
 audio:
   sample_rate: 16000
@@ -55,3 +55,9 @@ data:
 
 evaluation:
   n_bootstrap: 200
+
+robustness:
+  # speechdeepfake robustness: re-score trained models on degraded test audio
+  conditions: [mp3_high, mp3_low, narrowband, noise_20db]
+  test_sets: null        # null = all configured test sets
+  keep_audio: false

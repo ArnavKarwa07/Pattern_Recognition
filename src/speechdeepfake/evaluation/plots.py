@@ -388,3 +388,230 @@ def plot_subgroups(sub: pd.DataFrame, column: str, dataset: str, path: Path, run
     ax.set_title(f"EER by {what} - {dataset}")
     ax.legend()
     return _save(fig, path, run_type)
+
+
+# ------------------------------------------------------- additional analyses
+
+
+def plot_det(preds: dict, dataset: str, common: set, path: Path, run_type: str) -> Path:
+    """Detection error trade-off curves (FNR vs FPR on normal-deviate axes), the ASVspoof convention."""
+    from scipy.stats import norm
+
+    ticks = np.array([0.001, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.4, 0.6, 0.8, 0.95])
+    lim = norm.ppf([0.0008, 0.97])
+    eps = 1e-4
+    fig, ax = plt.subplots(figsize=(5.4, 5.2))
+    for m in _models_in(preds, dataset):
+        p = preds[(m, dataset)]
+        p = p[p["record_id"].isin(common)]
+        fpr, tpr, _ = roc_curve(p["label"], p["score"])
+        eer = compute_eer(p["label"], p["score"])[0]
+        ax.plot(norm.ppf(np.clip(fpr, eps, 1 - eps)), norm.ppf(np.clip(1 - tpr, eps, 1 - eps)), color=MODEL_COLORS[m],
+                label=f"{MODEL_LABELS[m]} (EER {eer:.1%})")
+        e = norm.ppf(np.clip(eer, eps, 1 - eps))
+        ax.plot(e, e, "o", color=MODEL_COLORS[m], ms=8, mec="white", mew=2)
+    ax.plot(lim, lim, color=TEXT_2, lw=0.8, ls=":", label="EER line (FPR = FNR)")
+    labels = [f"{100 * t:g}%" for t in ticks]
+    ax.set_xticks(norm.ppf(ticks), labels, rotation=45)
+    ax.set_yticks(norm.ppf(ticks), labels)
+    ax.set(xlim=lim, ylim=lim, xlabel="false positive rate (bona fide flagged as spoof)",
+           ylabel="false negative rate (spoof missed)", title=f"DET curves - {dataset} (n={len(common):,})")
+    ax.legend(loc="upper right", fontsize=8.5)
+    return _save(fig, path, run_type)
+
+
+def plot_score_distributions(preds: dict, dataset: str, common: set, path: Path, run_type: str) -> Path:
+    """Per-model score histograms by class, with the dev-selected threshold."""
+    models = _models_in(preds, dataset)
+    fig, axes = plt.subplots(1, len(models), figsize=(4.3 * len(models), 3.5), squeeze=False)
+    for ax, m in zip(axes[0], models):
+        p = preds[(m, dataset)]
+        p = p[p["record_id"].isin(common)]
+        s = p["score"].to_numpy(dtype=float)
+        lo, hi = np.quantile(s, [0.005, 0.995])
+        bins = np.linspace(lo, hi, 40)
+        for cls in (0, 1):
+            ax.hist(np.clip(s[p["label"].to_numpy() == cls], lo, hi), bins=bins, density=True, alpha=0.5,
+                    color=CLASS_COLORS[cls], label=CLASS_LABELS[cls], edgecolor="white", linewidth=0.5)
+        thr = float(p["threshold"].iloc[0])
+        ax.axvline(thr, color=TEXT, lw=1.2, ls="--")
+        ax.text(thr, ax.get_ylim()[1], " dev threshold", va="top", fontsize=8, color=TEXT_2)
+        ax.set_title(MODEL_LABELS[m], fontsize=10)
+        ax.set_xlabel("score (higher = more spoof-like)")
+    axes[0][0].set_ylabel("density")
+    axes[0][0].legend(loc="upper left")
+    fig.suptitle(f"Score distributions by class - {dataset}", fontsize=11)
+    return _save(fig, path, run_type)
+
+
+GAMMA_ORDER = ("scale*0.3", "scale", "scale*3")
+
+
+def plot_svm_tuning(tunings: dict[str, tuple[pd.DataFrame, dict]], path: Path, run_type: str) -> Optional[Path]:
+    """Dev-set EER over the (C, gamma) grid for each SVM; the selected cell is outlined."""
+    if not tunings:
+        return None
+    fig, axes = plt.subplots(1, len(tunings), figsize=(4.6 * len(tunings), 3.6), squeeze=False)
+    vmax = max(float(t["dev_eer"].max()) for t, _ in tunings.values())
+    for ax, (m, (t, sel)) in zip(axes[0], tunings.items()):
+        piv = t.pivot_table(index="C", columns="gamma_spec", values="dev_eer", aggfunc="first")
+        cols = [c for c in GAMMA_ORDER if c in piv.columns] + [c for c in piv.columns if c not in GAMMA_ORDER]
+        piv = piv[cols].sort_index(ascending=False)
+        ax.imshow(piv.to_numpy(), cmap=SEQ_BLUE, vmin=0, vmax=vmax, aspect="auto")
+        for i, c_val in enumerate(piv.index):
+            for j, g in enumerate(piv.columns):
+                v = piv.iloc[i, j]
+                ax.text(j, i, f"{v:.1%}", ha="center", va="center", fontsize=9, color="white" if v > 0.55 * vmax else TEXT)
+                if float(c_val) == float(sel["C"]) and g == sel["gamma_spec"]:
+                    ax.add_patch(plt.Rectangle((j - 0.47, i - 0.47), 0.94, 0.94, fill=False, ec=TEXT, lw=2.2))
+        ax.set_xticks(range(len(piv.columns)), piv.columns)
+        ax.set_yticks(range(len(piv.index)), [f"{c:g}" for c in piv.index])
+        ax.set_xlabel("gamma (multiple of sklearn 'scale')")
+        ax.set_ylabel("C")
+        ax.set_title(f"{MODEL_LABELS[m]}: dev EER", fontsize=10)
+        ax.grid(False)
+    fig.suptitle("SVM hyperparameter search on the development set (outlined = selected)", fontsize=11)
+    return _save(fig, path, run_type)
+
+
+def plot_generator_heatmap(sub: pd.DataFrame, dataset: str, path: Path, run_type: str) -> Optional[Path]:
+    """Models x generation systems EER heat map (each system vs. all bona fide)."""
+    s = sub[sub["dataset"] == dataset]
+    if s.empty or s["eer"].isna().all():
+        return None
+    piv = s.pivot_table(index="model", columns="generator_id", values="eer", aggfunc="first")
+    piv = piv.reindex([m for m in MODEL_ORDER if m in piv.index])
+    vmax = max(0.5, float(np.nanmax(piv.to_numpy())))
+    fig, ax = plt.subplots(figsize=(max(6, 0.75 * piv.shape[1] + 2.5), 0.7 * len(piv) + 1.8))
+    ax.imshow(piv.to_numpy(), cmap=SEQ_BLUE, vmin=0, vmax=vmax, aspect="auto")
+    for i in range(piv.shape[0]):
+        for j in range(piv.shape[1]):
+            v = piv.iloc[i, j]
+            if pd.notna(v):
+                ax.text(j, i, f"{v:.0%}", ha="center", va="center", fontsize=8.5, color="white" if v > 0.55 * vmax else TEXT)
+    rot = piv.shape[1] > 6
+    ax.set_xticks(range(piv.shape[1]), piv.columns, rotation=30 if rot else 0, ha="right" if rot else "center")
+    ax.set_yticks(range(piv.shape[0]), [MODEL_LABELS[m] for m in piv.index])
+    ax.set_title(f"EER per generation system - {dataset} (darker = harder to detect)")
+    ax.grid(False)
+    return _save(fig, path, run_type)
+
+
+def plot_tradeoff(table: pd.DataFrame, path: Path, run_type: str) -> Path:
+    """Accuracy-cost trade-off: inference time (log scale) vs EER, one panel per test set."""
+    datasets = list(dict.fromkeys(table["dataset"]))
+    fig, axes = plt.subplots(1, len(datasets), figsize=(4.8 * len(datasets), 3.9), squeeze=False, sharey=True)
+    for ax, d in zip(axes[0], datasets):
+        sub = table[table["dataset"] == d].sort_values("eer")
+        for k, (_, r) in enumerate(sub.iterrows()):
+            m = r["model"]
+            ax.errorbar(r["inference_ms_per_recording"], r["eer"],
+                        yerr=[[max(r["eer"] - r["eer_ci_low"], 0)], [max(r["eer_ci_high"] - r["eer"], 0)]],
+                        fmt="none", capsize=3, ecolor=MODEL_COLORS[m], elinewidth=1.2)
+            ax.plot(r["inference_ms_per_recording"], r["eer"], "o", ms=9, color=MODEL_COLORS[m], mec="white", mew=2)
+            # stagger direct labels (sorted by EER) so close points do not collide
+            ax.annotate(f"{MODEL_LABELS[m]} ({r['eer']:.1%})", (r["inference_ms_per_recording"], r["eer"]),
+                        xytext=(10, -14 if k % 2 == 0 else 10), textcoords="offset points", fontsize=8, color=TEXT_2)
+        ax.set_xscale("log")
+        x0, x1 = ax.get_xlim()
+        ax.set_xlim(x0 / 1.5, x1 * 4)
+        ax.set_xlabel("inference time per recording (ms, log scale)")
+        ax.set_title(f"{d} ({sub['condition'].iloc[0].replace('_', ' ')})", fontsize=10)
+        ax.yaxis.set_major_formatter(matplotlib.ticker.PercentFormatter(1.0))
+    axes[0][0].set_ylim(bottom=0)
+    axes[0][0].set_ylabel("EER (lower is better)")
+    fig.suptitle("Detection error vs. computational cost (bottom-left is best)", fontsize=11)
+    return _save(fig, path, run_type)
+
+
+def plot_robustness(rob: pd.DataFrame, metric: str, ylabel: str, path: Path, run_type: str) -> Optional[Path]:
+    """Grouped bars per audio condition (clean first), one panel per test set."""
+    if rob is None or rob.empty:
+        return None
+    datasets = list(dict.fromkeys(rob["dataset"]))
+    conds = list(dict.fromkeys(rob["audio_condition"]))
+    labels = rob.drop_duplicates("audio_condition").set_index("audio_condition")["audio_condition_label"]
+    fig, axes = plt.subplots(len(datasets), 1, figsize=(1.7 * len(conds) + 3.5, 3.7 * len(datasets)), squeeze=False)
+    for ax, d in zip(axes[:, 0], datasets):
+        s = rob[rob["dataset"] == d]
+        models = [m for m in MODEL_ORDER if m in set(s["model"])]
+        w = 0.8 / len(models)
+        x = np.arange(len(conds))
+        for k, m in enumerate(models):
+            v = s[s["model"] == m].set_index("audio_condition").reindex(conds)
+            kw = {}
+            if metric == "eer":
+                kw = {"yerr": np.vstack([v["eer"] - v["eer_ci_low"], v["eer_ci_high"] - v["eer"]]).clip(min=0),
+                      "capsize": 2, "error_kw": {"lw": 0.8, "ecolor": TEXT_2}}
+            bars = ax.bar(x + (k - (len(models) - 1) / 2) * w, v[metric], w * 0.92, color=MODEL_COLORS[m],
+                          label=MODEL_LABELS[m], **kw)
+            ax.bar_label(bars, labels=[f"{t:.0%}" for t in v[metric]], fontsize=7, color=TEXT_2, padding=2)
+        ax.set_xticks(x, [labels[c].replace(", ", ",\n").replace(" (", "\n(") for c in conds], fontsize=8.5)
+        ax.yaxis.set_major_formatter(matplotlib.ticker.PercentFormatter(1.0))
+        ax.set_ylabel(ylabel)
+        ax.set_ylim(0, 1.1 if metric != "eer" else max(0.6, float((s["eer_ci_high"]).max()) + 0.08))
+        ax.axhline(0.5, color=TEXT_2, lw=0.8, ls=":")
+        ax.text(-0.45, 0.5, "chance", va="bottom", ha="left", fontsize=7.5, color=TEXT_2)
+        ax.set_title(f"{d}: {ylabel} under audio degradations (same records, dev thresholds)", fontsize=10)
+        ax.legend(loc="upper left", bbox_to_anchor=(0, 1.0), fontsize=8, ncol=len(models))
+        ax.set_xlim(-0.5, len(conds) - 0.5)
+    return _save(fig, path, run_type)
+
+
+def plot_degradation_examples(mats: list[tuple[str, np.ndarray]], sr: int, hop: int, path: Path, run_type: str) -> Path:
+    """log-Mel spectrogram of one recording under each audio condition."""
+    fig, axes = plt.subplots(1, len(mats), figsize=(3.2 * len(mats), 3.2), squeeze=False, sharey=True)
+    vmin = min(np.percentile(m, 1) for _, m in mats)
+    vmax = max(np.percentile(m, 99) for _, m in mats)
+    for ax, (name, m) in zip(axes[0], mats):
+        im = ax.imshow(m, origin="lower", aspect="auto", cmap=SPEC_CMAP, vmin=vmin, vmax=vmax,
+                       extent=(0, m.shape[1] * hop / sr, 0, m.shape[0]))
+        ax.set_title(name, fontsize=9)
+        ax.set_xlabel("time (s)")
+        ax.grid(False)
+    axes[0][0].set_ylabel("Mel band")
+    fig.colorbar(im, ax=axes[0].tolist(), shrink=0.85, label="log power (shared scale)")
+    fig.suptitle("One test recording under each audio condition (log-Mel)", fontsize=11, y=1.06)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _banner(fig, run_type, y=-0.06)
+    fig.savefig(path, bbox_inches="tight")
+    plt.close(fig)
+    return path
+
+
+def plot_pipeline_overview(path: Path) -> Path:
+    """Static block diagram of the three pipelines and the shared evaluation protocol."""
+    from matplotlib.patches import FancyBboxPatch
+
+    fig, ax = plt.subplots(figsize=(12, 5.4))
+    ax.set_xlim(0, 12)
+    ax.set_ylim(0, 5.4)
+    ax.axis("off")
+
+    def box(x, y, w, h, text, ec=TEXT_2, fc="#f4f3ef"):
+        ax.add_patch(FancyBboxPatch((x, y), w, h, boxstyle="round,pad=0.04,rounding_size=0.12", fc=fc, ec=ec, lw=1.4))
+        ax.text(x + w / 2, y + h / 2, text, ha="center", va="center", fontsize=8.6, color=TEXT)
+
+    def arrow(x0, y0, x1, y1):
+        ax.annotate("", (x1, y1), (x0, y0), arrowprops={"arrowstyle": "-|>", "color": TEXT_2, "lw": 1.2})
+
+    box(0.1, 3.6, 2.3, 1.2, "Datasets\nASVspoof 2019 LA\ntrain / dev / eval\nCD-ADD test (external)")
+    box(0.1, 1.7, 2.3, 1.4, "Shared preprocessing\ndecode, mono, 16 kHz\nfixed 4 s window\nstart crop / repeat pad")
+    arrow(1.25, 3.6, 1.25, 3.1)
+    rows = [("mfcc_svm", 3.8, "40 MFCCs per frame\nmean + std over time\n-> 80-D vector", "StandardScaler\n+ RBF SVM"),
+            ("logmel_cnn", 2.2, "log-Mel spectrogram\n80 bands x 401 frames\nper-band standardised", "4-block 2-D CNN\n~98k parameters"),
+            ("wav2vec_svm", 0.6, "frozen wav2vec 2.0 base\nlast layer, mean-pooled\n-> 768-D vector", "StandardScaler\n+ RBF SVM")]
+    for m, y, feat, clf in rows:
+        c = MODEL_COLORS[m]
+        box(3.0, y, 2.5, 1.05, feat, ec=c, fc="white")
+        box(6.0, y, 2.0, 1.05, clf, ec=c, fc="white")
+        ax.text(3.0, y + 1.13, MODEL_LABELS[m], fontsize=9.5, color=TEXT, weight="bold")
+        arrow(2.4, 2.4, 3.0, y + 0.52)
+        arrow(5.5, y + 0.52, 6.0, y + 0.52)
+        arrow(8.0, y + 0.52, 8.5, 2.4)
+    box(8.5, 1.7, 1.6, 1.4, "score\n(higher = spoof)\nvs. threshold\nchosen on dev")
+    arrow(10.1, 2.4, 10.4, 2.4)
+    box(10.4, 1.0, 1.55, 2.8, "Evaluation\n\nEER + 95% CI\nROC / DET / PR\nAUC, BA, F1\nper generator\nrobustness\ncost")
+    ax.text(6, 5.2, "Three detectors, one protocol: fit on train, tune + threshold on dev, test sets untouched",
+            ha="center", fontsize=11, color=TEXT, weight="bold")
+    return _save(fig, path)

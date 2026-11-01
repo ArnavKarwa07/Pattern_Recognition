@@ -168,6 +168,16 @@ def evaluate(cfg: ExperimentConfig, models: list[str], data: Optional[Experiment
     return compile_results(cfg)
 
 
+def robustness(cfg: ExperimentConfig, models: list[str], force: bool = False, data: Optional[ExperimentData] = None):
+    """Re-score trained models on degraded copies of the test sets (see evaluation/robustness.py)."""
+    from speechdeepfake.evaluation.robustness import run_robustness
+
+    data = data or load_data(cfg)
+    if not data.tests:
+        raise RuntimeError(f"No test set is available: {data.skipped_tests}")
+    return run_robustness(cfg, data, models, force=force)
+
+
 def figures_and_report(cfg: ExperimentConfig) -> tuple[list[Path], Path]:
     from speechdeepfake.evaluation.figures import generate_figures
     from speechdeepfake.evaluation.report import write_report
@@ -211,6 +221,7 @@ def smoke_test_config(base: ExperimentConfig, out_root: Path, wav2vec_model: Opt
             "max_train_samples": None, "max_dev_samples": None, "max_test_samples": None, "holdout_generators": [],
         },
         "evaluation": {"n_bootstrap": 20},
+        "robustness": {"conditions": ["noise_20db"], "test_sets": None},
     }
     values = base.to_dict()
     values.pop("config_path", None)
@@ -226,7 +237,7 @@ def smoke_test(base: ExperimentConfig, out_root: Path, wav2vec_model: Optional[s
     """Run prepare/validate/train/evaluate/figures/report on a synthetic fixture.
 
     Returns a dict of checks; raises on any failure. Outputs go to
-    ``out_root`` (default ``results/smoke_test``) and are clearly labelled.
+    ``out_root`` (default: the system temp folder) and are clearly labelled.
     """
     from speechdeepfake.data.synthetic import make_fixture
 
@@ -240,11 +251,13 @@ def smoke_test(base: ExperimentConfig, out_root: Path, wav2vec_model: Optional[s
     data = load_data(cfg)
     train(cfg, list(MODEL_NAMES), data=data)
     table = evaluate(cfg, list(MODEL_NAMES), data=data)
+    rob = robustness(cfg, list(MODEL_NAMES), data=data)
     made, report = figures_and_report(cfg)
     checks = {
         "models_evaluated": sorted(table["model"].unique().tolist()),
         "n_test_records": int(table["n_common"].iloc[0]),
         "metrics_finite": bool(table[["eer", "roc_auc", "balanced_accuracy", "f1"]].notna().all().all()),
+        "robustness_rows": len(rob),
         "figures": len(made),
         "report": str(report),
     }

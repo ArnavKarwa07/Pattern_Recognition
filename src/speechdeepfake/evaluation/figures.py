@@ -9,6 +9,7 @@ from __future__ import annotations
 import shutil
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from speechdeepfake import artifacts
@@ -45,6 +46,21 @@ def _examples(train: pd.DataFrame, cfg: ExperimentConfig, per_class: int = 1):
             wave = load_and_preprocess(resolve_audio_path(r["audio_path"], cfg.data_dir), cfg.audio)
             rows.append((r["record_id"].split("/")[-1], lab, wave))
     return rows
+
+
+def _degradation_examples(cfg: ExperimentConfig, parts: dict[str, pd.DataFrame], path: Path) -> Path:
+    """log-Mel of the first bona fide in-domain test recording under every audio condition."""
+    from speechdeepfake.evaluation.robustness import CLEAN_LABEL, CONDITIONS, apply_degradation
+
+    test = next((t.name for t in cfg.test_sets() if t.name in parts), None)
+    r = parts[test][parts[test]["label"] == 0].sort_values("record_id").iloc[0]
+    x = load_and_preprocess(resolve_audio_path(r["audio_path"], cfg.data_dir), cfg.audio)
+    sr = cfg.audio.sample_rate
+    mats = [(CLEAN_LABEL, logmel_numpy(x, sr, cfg.logmel))]
+    for c in cfg.robustness.conditions:
+        y = apply_degradation(x, sr, c, np.random.default_rng(cfg.seed))[: len(x)]
+        mats.append((CONDITIONS[c]["label"], logmel_numpy(y, sr, cfg.logmel)))
+    return plots.plot_degradation_examples(mats, sr, cfg.logmel.hop_length, path, cfg.run_type)
 
 
 def generate_figures(cfg: ExperimentConfig) -> tuple[list[Path], dict[str, str]]:
@@ -93,13 +109,23 @@ def generate_figures(cfg: ExperimentConfig) -> tuple[list[Path], dict[str, str]]
     else:
         skipped["dataset figures"] = f"{summary_path} missing (run training first, which exports the partitions)"
 
-    # C. CNN history
+    made.append(plots.plot_pipeline_overview(figs / "pipeline_overview.png"))
+
+    # C. CNN history and SVM tuning grids
     hist = artifacts.model_dir(cfg, "logmel_cnn") / "history.csv"
     if hist.exists():
         dev_name = f"{cfg.data.dev['corpus']}/{cfg.data.dev['split']}"
         made.append(plots.plot_learning_curves(pd.read_csv(hist), figs / "cnn_learning_curves.png", rt, dev_name))
     else:
         skipped["cnn_learning_curves"] = "CNN not trained"
+    tunings = {}
+    for m in ("mfcc_svm", "wav2vec_svm"):
+        d = artifacts.model_dir(cfg, m)
+        if (d / "tuning.csv").exists() and (d / "metadata.json").exists():
+            tunings[m] = (pd.read_csv(d / "tuning.csv"), artifacts.load_json(d / "metadata.json")["selected"])
+    p = plots.plot_svm_tuning(tunings, figs / "svm_tuning.png", rt)
+    if p:
+        made.append(p)
 
     # D/E. comparison and generalisation
     comp = artifacts.metrics_dir(cfg) / "comparison.csv"
@@ -109,10 +135,13 @@ def generate_figures(cfg: ExperimentConfig) -> tuple[list[Path], dict[str, str]]
         for dataset in table["dataset"].unique():
             common = common_records(preds, dataset)
             made += plots.plot_roc_pr(preds, dataset, common, figs, rt)
+            made.append(plots.plot_det(preds, dataset, common, figs / f"det_{dataset}.png", rt))
+            made.append(plots.plot_score_distributions(preds, dataset, common, figs / f"scores_{dataset}.png", rt))
             made.append(plots.plot_confusion(table, dataset, figs / f"confusion_{dataset}.png", rt))
         made.append(plots.plot_metric_bars(table, figs / "eer_comparison.png", rt))
         made.append(plots.plot_ba_f1(table, figs / "ba_f1_comparison.png", rt))
         made.append(plots.plot_inference_time(table, figs / "inference_time.png", rt))
+        made.append(plots.plot_tradeoff(table, figs / "tradeoff_eer_vs_time.png", rt))
         p = plots.plot_generalization(table, figs / "generalization_eer.png", rt)
         if p:
             made.append(p)
@@ -126,12 +155,31 @@ def generate_figures(cfg: ExperimentConfig) -> tuple[list[Path], dict[str, str]]
                     p = plots.plot_subgroups(sub, col, dataset, figs / f"eer_by_{col.replace('_id', '')}_{dataset}.png", rt)
                     if p:
                         made.append(p)
+                    if col == "generator_id":
+                        p = plots.plot_generator_heatmap(sub, dataset, figs / f"eer_heatmap_generator_{dataset}.png", rt)
+                        if p:
+                            made.append(p)
         tdir = artifacts.tables_dir(cfg)
         tdir.mkdir(parents=True, exist_ok=True)
         for f in artifacts.metrics_dir(cfg).glob("*.csv"):
             shutil.copy2(f, tdir / f.name)
     else:
         skipped["comparison figures"] = "no evaluation results yet (run `speechdeepfake evaluate-all`)"
+
+    # F. robustness to audio degradations
+    rob_csv = artifacts.metrics_dir(cfg) / "robustness.csv"
+    if rob_csv.exists():
+        rob = pd.read_csv(rob_csv)
+        made.append(plots.plot_robustness(rob, "eer", "EER", figs / "robustness_eer.png", rt))
+        made.append(plots.plot_robustness(rob, "balanced_accuracy", "balanced accuracy",
+                                          figs / "robustness_balanced_accuracy.png", rt))
+        if parts and cfg.test_sets():
+            try:
+                made.append(_degradation_examples(cfg, parts, figs / "robustness_examples.png"))
+            except Exception as e:
+                skipped["robustness_examples"] = f"could not load example audio: {e}"
+    else:
+        skipped["robustness figures"] = "no robustness results (run `speechdeepfake robustness`)"
     for k, v in skipped.items():
         log.info("skipped %s: %s", k, v)
     return made, skipped

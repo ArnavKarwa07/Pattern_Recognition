@@ -9,6 +9,7 @@ import argparse
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 from speechdeepfake import __version__, artifacts
@@ -141,7 +142,7 @@ def cmd_smoke(args) -> int:
     from speechdeepfake.pipeline import smoke_test
 
     base = _cfg(args)
-    out = Path(args.out) if args.out else Path(base.project_root) / "results" / "smoke_test"
+    out = Path(args.out) if args.out else Path(tempfile.gettempdir()) / "speechdeepfake_smoke_test"
     setup_logging(out / "logs", "smoke-test")
     checks = smoke_test(base, out, wav2vec_model=args.wav2vec_model)
     print("\nSMOKE TEST PASSED (synthetic fixture - software check only, not research results)")
@@ -175,6 +176,19 @@ def cmd_evaluate(args) -> int:
     _start(cfg, f"evaluate-{model}")
     table = evaluate(cfg, expand_models(model))
     cols = ["model", "dataset", "n", "eer", "eer_ci_low", "eer_ci_high", "roc_auc", "balanced_accuracy", "f1", "threshold"]
+    print(table[cols].to_string(index=False))
+    if cfg.run_type != "full":
+        print(f"\n[{cfg.run_type.upper()}] These are not final research results.")
+    return 0
+
+
+def cmd_robustness(args) -> int:
+    from speechdeepfake.pipeline import expand_models, robustness
+
+    cfg = _cfg(args)
+    _start(cfg, "robustness")
+    table = robustness(cfg, expand_models(args.model), force=args.force)
+    cols = ["model", "dataset", "audio_condition", "n", "eer", "delta_eer_vs_clean", "roc_auc", "balanced_accuracy"]
     print(table[cols].to_string(index=False))
     if cfg.run_type != "full":
         print(f"\n[{cfg.run_type.upper()}] These are not final research results.")
@@ -256,7 +270,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--no-hash", action="store_true", help="skip SHA-1 hashing (faster; disables duplicate-audio check)")
     sp.add_argument("--force", action="store_true", help="re-validate even if the manifest is unchanged")
     sp = add("smoke-test", cmd_smoke, "Run all three pipelines end to end on a synthetic fixture (software check only).")
-    sp.add_argument("--out", default=None, help="output directory (default: results/smoke_test)")
+    sp.add_argument("--out", default=None, help="output directory (default: <system temp>/speechdeepfake_smoke_test)")
     sp.add_argument("--wav2vec-model", default=None, help="override wav2vec.model_name, e.g. 'random-tiny' for offline use")
     sp = add("extract-features", cmd_extract, "Compute and cache MFCC and/or wav2vec 2.0 features for all partitions.")
     sp.add_argument("--model", choices=MODEL_CHOICES, default="all")
@@ -266,6 +280,10 @@ def build_parser() -> argparse.ArgumentParser:
     sp = add("evaluate", cmd_evaluate, "Evaluate one trained model on the configured test sets.")
     sp.add_argument("--model", choices=MODEL_CHOICES, required=True)
     add("evaluate-all", cmd_evaluate, "Evaluate all three trained models on the same test records and build comparison tables.")
+    sp = add("robustness", cmd_robustness,
+             "Re-score trained models on MP3-compressed, narrowband and noisy copies of the test sets.")
+    sp.add_argument("--model", choices=MODEL_CHOICES, default="all")
+    sp.add_argument("--force", action="store_true", help="recompute conditions whose predictions already exist")
     add("plots", cmd_plots, "Generate all figures supported by the saved outputs.")
     sp = add("report", cmd_report, "Generate figures and the Markdown report from saved results.")
     sp.add_argument("--no-plots", action="store_true", help="only rewrite the Markdown report")

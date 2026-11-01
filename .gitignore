@@ -14,9 +14,9 @@ venv/
 # (anchored with a leading / so they do not match src/speechdeepfake/models etc.)
 /data/
 /models/
-/results/
-# reports/figures and reports/tables are committed so the report renders on GitHub
-/reports/pilot/
+/results/run_data/
+# results/ (reports, figures, tables) is committed so the report renders on GitHub
+/reports/
 *.log
 
 # Audio and arrays should never be committed
